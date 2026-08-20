@@ -1,0 +1,21 @@
+{
+  "name": "gtms",
+  "version": "1.0.0",
+  "description": "Guard Tour Management System — patrol tracking, QR checkpoints, face verification, observation routing and automated daily email reports. Postgres/Supabase storage.",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js",
+    "reset": "node server/seed.js --fresh"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.10.0",
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,30 @@
+# Render Blueprint for GTMS. Data lives in Supabase Postgres, so it persists on
+# the free plan (no disk needed). Set DATABASE_URL in the Render dashboard.
+services:
+  - type: web
+    name: gtms
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false            # paste your Supabase connection string in the dashboard
+      - key: DEFAULT_MANAGER_EMAIL
+        value: security.manager@company.com
+      - key: DEFAULT_REPORT_TIME
+        value: "07:00"
+      # --- Email (optional): fill to send real mail; blank = demo preview links ---
+      # - key: SMTP_HOST
+      #   value: smtp.gmail.com
+      # - key: SMTP_PORT
+      #   value: "465"
+      # - key: SMTP_SECURE
+      #   value: "true"
+      # - key: SMTP_USER
+      #   sync: false
+      # - key: SMTP_PASS
+      #   sync: false
+      # - key: MAIL_FROM
+      #   value: "GTMS Security <gtms@yourcompany.com>"
