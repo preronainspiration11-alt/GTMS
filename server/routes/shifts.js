@@ -16,11 +16,15 @@ router.get("/active", async (req, res, next) => {
 
 router.get("/", async (req, res, next) => {
   try {
+    const { from, to } = req.query;
+    const args = []; let where = "WHERE status='ended'";
+    if (from) { args.push(Number(from)); where += ` AND ended_at >= $${args.length}`; }
+    if (to)   { args.push(Number(to));   where += ` AND ended_at < $${args.length}`; }
     const { rows } = await q(`
       SELECT s.*,
         (SELECT COUNT(*) FROM scans WHERE shift_id=s.id) AS scanned,
         (SELECT COUNT(*) FROM observations WHERE shift_id=s.id) AS obs
-      FROM shifts s WHERE status='ended' ORDER BY ended_at DESC`);
+      FROM shifts s ${where} ORDER BY ended_at DESC`, args);
     res.json(rows.map((r) => ({
       id: r.id, guard: r.guard_name, faceImg: r.face_img,
       startedAt: r.started_at, endedAt: r.ended_at,

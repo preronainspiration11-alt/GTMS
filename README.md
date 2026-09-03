@@ -14,6 +14,23 @@ email reports to the Security Manager.
 
 > **Want it online with its own URL?** See **DEPLOY.md** for GitHub + Render steps.
 
+## Logins
+
+GTMS now requires sign-in. Two roles:
+
+- **admin** — dashboard with daily and monthly (date-filtered) patrol reports, plus setup.
+- **guard** — the patrol app (verify, scan, log observations).
+
+Two default accounts are created on first run (change the passwords):
+
+| Username | Default password | Role |
+|---|---|---|
+| `admin` | `gtms-admin` | Administrator dashboard |
+| `guard` | `gtms-guard` | Security personnel (patrol) |
+
+Set `ADMIN_PASSWORD`, `GUARD_PASSWORD` and a long `JWT_SECRET` in your environment
+(`.env` locally, dashboard on Render) before real use.
+
 ## 1. Requirements
 
 - **Node.js 22.5 or newer** (`node -v` to check) — <https://nodejs.org>

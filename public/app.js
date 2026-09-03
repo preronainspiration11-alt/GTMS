@@ -1,16 +1,19 @@
 /* GTMS front-end — talks to the Express API. All data is persisted server-side. */
 
+/* ---------- auth token ---------- */
+function getToken() { try { return localStorage.getItem("gtms_token"); } catch (e) { return APP._tok || null; } }
+function setToken(t) { try { localStorage.setItem("gtms_token", t); } catch (e) { APP._tok = t; } }
+function clearToken() { try { localStorage.removeItem("gtms_token"); } catch (e) {} APP._tok = null; }
+
 /* ---------- API client ---------- */
 async function api(path, opts = {}) {
+  const tok = getToken();
   const res = await fetch("/api" + path, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
     ...opts,
   });
-  if (!res.ok) {
-    let msg = res.statusText;
-    try { msg = (await res.json()).error || msg; } catch (e) {}
-    throw new Error(msg);
-  }
+  if (res.status === 401) { clearToken(); APP.role = null; renderLogin("Session expired — please sign in again"); throw new Error("Unauthorized"); }
+  if (!res.ok) { let msg = res.statusText; try { msg = (await res.json()).error || msg; } catch (e) {} throw new Error(msg); }
   if (res.status === 204) return null;
   const txt = await res.text();
   return txt ? JSON.parse(txt) : null;
@@ -21,6 +24,7 @@ let ROUTE = [], DEPARTMENTS = [], CATEGORIES = [];
 const APP = {
   settings: {}, shift: null, shifts: [], observations: [],
   reportData: null, tab: "home", moreSub: null,
+  role: null, user: null, dash: { mode: "daily", date: "", month: "" }, _dashList: [],
 };
 
 async function loadConfig() {
@@ -64,6 +68,70 @@ async function startCam(v, facing = "environment") { stopCam(); try { cam = awai
 function stopCam() { if (raf) { cancelAnimationFrame(raf); raf = null; } if (cam) { cam.getTracks().forEach((t) => t.stop()); cam = null; } }
 function grab(v, w = 560) { const c = document.createElement("canvas"); const ar = (v.videoWidth || 4) / (v.videoHeight || 3); c.width = w; c.height = Math.round(w / ar); c.getContext("2d").drawImage(v, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", 0.72); }
 
+/* ---------- auth screens ---------- */
+function renderLogin(err) {
+  $("#tabbar").style.display = "none";
+  $("#appbar").innerHTML = `<div><h1>GTMS</h1><div class="sub">Guard Tour Management System</div></div>`;
+  $("#body").innerHTML = `
+    <div style="max-width:340px;margin:7vh auto 0">
+      <div class="card">
+        <div style="text-align:center;margin-bottom:6px"><div style="width:58px;height:58px;border-radius:17px;background:var(--primary-t);display:inline-grid;place-items:center;color:var(--primary);font-weight:800;font-size:22px">GT</div></div>
+        <div class="li-t" style="text-align:center;font-size:19px">Sign in</div>
+        <div class="li-s" style="text-align:center;margin-bottom:16px">Security personnel &amp; administrators</div>
+        <div class="field"><label class="fld">Username</label><input id="lu" autocomplete="username" placeholder="admin or guard"></div>
+        <div class="field"><label class="fld">Password</label><input id="lp" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+        ${err ? `<div class="chip r" style="display:block;text-align:center;margin-bottom:12px;padding:8px">${esc(err)}</div>` : ""}
+        <button class="btn primary block" id="lbtn">Sign in</button>
+      </div>
+    </div>`;
+  const submit = async () => {
+    const u = ($("#lu").value || "").trim(), p = $("#lp").value || "";
+    if (!u || !p) { renderLogin("Enter your username and password"); return; }
+    const btn = $("#lbtn"); busy(btn, true);
+    try {
+      const r = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u, password: p }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); renderLogin(e.error || "Invalid login"); return; }
+      const data = await r.json();
+      setToken(data.token); APP.user = data.user; APP.role = data.user.role;
+      await loadConfig(); showApp();
+    } catch (e) { renderLogin("Cannot reach the server"); }
+  };
+  $("#lbtn").onclick = submit;
+  $("#lp").addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+}
+function logout() { clearToken(); APP.role = null; APP.user = null; renderLogin(); }
+function showApp() {
+  $("#tabbar").style.display = "";
+  const now = new Date();
+  APP.dash.date = now.toISOString().slice(0, 10);
+  APP.dash.month = now.toISOString().slice(0, 7);
+  APP.tab = APP.role === "admin" ? "dashboard" : "home";
+  APP.moreSub = null; APP.reportData = null;
+  renderTabbar(); render();
+}
+
+/* ---------- tab bar ---------- */
+function tabIcon(id) {
+  const I = {
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+    patrol: '<path d="M12 21s-7-6.3-7-11a7 7 0 0 1 14 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/>',
+    alerts: '<path d="M10.3 3.6 2.2 18a1.7 1.7 0 0 0 1.5 2.5h16.6A1.7 1.7 0 0 0 21.8 18L13.7 3.6a1.7 1.7 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    reports: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
+    dashboard: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+    more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${I[id] || ""}</svg>`;
+}
+function renderTabbar() {
+  const guard = [["home", "Home"], ["patrol", "Patrol"], ["alerts", "Alerts"], ["reports", "Reports"], ["more", "More"]];
+  const admin = [["dashboard", "Reports"], ["alerts", "Alerts"], ["more", "Setup"]];
+  const tabs = APP.role === "admin" ? admin : guard;
+  $("#tabbar").style.gridTemplateColumns = `repeat(${tabs.length},1fr)`;
+  $("#tabbar").innerHTML = tabs.map(([id, label]) =>
+    `<button class="tab ${id === APP.tab ? "on" : ""}" data-tab="${id}">${tabIcon(id)}${label}${id === "alerts" ? `<span class="dotbadge" id="tabBadge" style="display:none">0</span>` : ""}</button>`
+  ).join("");
+}
+
 /* ---------- router ---------- */
 function setTab(t) { APP.tab = t; APP.moreSub = null; APP.reportData = null; $$(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === t)); render(); }
 $("#tabbar").addEventListener("click", (e) => { const b = e.target.closest(".tab"); if (b) setTab(b.dataset.tab); });
@@ -71,6 +139,7 @@ $("#tabbar").addEventListener("click", (e) => { const b = e.target.closest(".tab
 async function render() {
   refreshBadges();
   try {
+    if (APP.tab === "dashboard") return await renderDashboard();
     if (APP.tab === "home") return await renderHome();
     if (APP.tab === "patrol") return renderPatrol();
     if (APP.tab === "alerts") return renderAlerts();
@@ -377,7 +446,8 @@ async function renderReports() {
   scrollTop();
 }
 async function openReport(id) {
-  APP.tab = "reports"; $$(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === "reports"));
+  APP.tab = APP.role === "admin" ? "dashboard" : "reports";
+  $$(".tab").forEach((b) => b.classList.toggle("on", b.dataset.tab === APP.tab));
   try { APP.reportData = await api(`/shifts/${id}`); renderReportDetail(); }
   catch (e) { toast("Could not load report", e.message, "r"); }
 }
@@ -448,7 +518,7 @@ function exportReportExcel() {
   XLSX.writeFile(wb, fname);
   toast("Excel exported", fname, "g");
 }
-function backReports() { APP.reportData = null; renderReports(); }
+function backReports() { APP.reportData = null; if (APP.role === "admin") renderDashboard(); else renderReports(); }
 function emailReport(id) {
   const s = APP.reportData; if (!s || s.id !== id) return;
   const obs = s.observations, missed = ROUTE.filter((c) => !s.scans.find((x) => x.code === c.code));
@@ -480,18 +550,92 @@ function emailReport(id) {
   };
 }
 
+/* ---------- ADMIN DASHBOARD ---------- */
+function dashRange() {
+  if (APP.dash.mode === "daily") {
+    const from = new Date(APP.dash.date + "T00:00:00").getTime();
+    return { from, to: from + 864e5 };
+  }
+  const [y, m] = APP.dash.month.split("-").map(Number);
+  return { from: new Date(y, m - 1, 1).getTime(), to: new Date(y, m, 1).getTime() };
+}
+function setDash(mode) { APP.dash.mode = mode; renderDashboard(); }
+async function renderDashboard() {
+  await loadObs();
+  appbar("Admin dashboard", APP.user ? APP.user.name : "Administrator", {
+    right: `<button class="back" onclick="logout()" title="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg></button>`,
+  });
+  const { from, to } = dashRange();
+  const list = await api(`/shifts?from=${from}&to=${to}`);
+  APP._dashList = list;
+  const totalObs = list.reduce((a, s) => a + s.obsCount, 0);
+  const avg = list.length ? Math.round(list.reduce((a, s) => a + s.scannedCount / ROUTE.length, 0) / list.length * 100) : 0;
+  const heading = APP.dash.mode === "daily"
+    ? "Patrols on " + fmtDate(new Date(from))
+    : "Patrols in " + new Date(from).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  $("#body").innerHTML = `
+    <div class="row" style="gap:8px;margin:4px 0 12px">
+      <button class="btn ${APP.dash.mode === "daily" ? "primary" : "line"} sm" style="flex:1" onclick="setDash('daily')">Daily report</button>
+      <button class="btn ${APP.dash.mode === "monthly" ? "primary" : "line"} sm" style="flex:1" onclick="setDash('monthly')">Monthly report</button>
+    </div>
+    <div class="card tight" style="margin-bottom:12px">
+      ${APP.dash.mode === "daily"
+        ? `<label class="fld">Select date</label><input type="date" id="dfDate" value="${APP.dash.date}">`
+        : `<label class="fld">Select month</label><input type="month" id="dfMonth" value="${APP.dash.month}">`}
+    </div>
+    <div class="row" style="gap:10px;margin-bottom:4px">
+      <div class="card tight" style="flex:1;margin:0"><div class="stat"><span class="n g">${list.length}</span><span class="l">Patrols</span></div></div>
+      <div class="card tight" style="flex:1;margin:0"><div class="stat"><span class="n r">${totalObs}</span><span class="l">Observations</span></div></div>
+      <div class="card tight" style="flex:1;margin:0"><div class="stat"><span class="n">${avg}%</span><span class="l">Avg coverage</span></div></div>
+    </div>
+    ${list.length ? `<button class="btn line block" style="margin:12px 0 4px" onclick="exportDashboardExcel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l3 3M12 13l-3 3"/></svg>Export list to Excel</button>` : ""}
+    <div class="sec-title">${heading}</div>
+    ${list.length ? list.map((s) => { const missed = ROUTE.length - s.scannedCount; return `
+      <div class="card tight" onclick="openReport(${s.id})">
+        <div class="row">
+          <div class="ring" style="width:52px;height:52px;flex:none">${ringSvg(s.scannedCount, ROUTE.length, false)}<div class="mid"><div style="font-family:var(--disp);font-weight:700;font-size:14px">${s.scannedCount}</div></div></div>
+          <div class="li-body"><div class="li-t">${esc(gname(s.guard))}</div><div class="li-s">${fmtDT(new Date(s.startedAt))}</div></div>
+          <div style="text-align:right">${missed ? `<span class="chip a">${missed} missed</span>` : `<span class="chip g">Full route</span>`}<div class="li-s" style="margin-top:4px">${s.obsCount} alerts</div></div>
+        </div>
+      </div>`; }).join("") : `<div class="card">${empty("No patrols in this period.")}</div>`}
+    <div style="height:8px"></div>`;
+  if ($("#dfDate")) $("#dfDate").onchange = (e) => { APP.dash.date = e.target.value; renderDashboard(); };
+  if ($("#dfMonth")) $("#dfMonth").onchange = (e) => { APP.dash.month = e.target.value; renderDashboard(); };
+  scrollTop();
+}
+function exportDashboardExcel() {
+  if (!window.XLSX) { toast("Excel library not loaded", "Check your connection", "r"); return; }
+  const list = APP._dashList || [];
+  const rows = [["Date", "Guard", "Start", "End", "Covered", "Not covered", "Observations"]].concat(
+    list.map((s) => [fmtDate(new Date(s.startedAt)), s.guard, fmtHM(new Date(s.startedAt)), s.endedAt ? fmtHM(new Date(s.endedAt)) : "", `${s.scannedCount}/${ROUTE.length}`, ROUTE.length - s.scannedCount, s.obsCount])
+  );
+  const wb = XLSX.utils.book_new();
+  const sh = XLSX.utils.aoa_to_sheet(rows);
+  sh["!cols"] = [{ wch: 14 }, { wch: 24 }, { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, sh, APP.dash.mode === "daily" ? "Daily" : "Monthly");
+  const label = APP.dash.mode === "daily" ? APP.dash.date : APP.dash.month;
+  XLSX.writeFile(wb, `GTMS-Patrols-${label}.xlsx`);
+  toast("Excel exported", `GTMS-Patrols-${label}.xlsx`, "g");
+}
+
 /* ---------- MORE ---------- */
 function renderMore() {
   if (APP.moreSub === "qr") return renderQR();
   if (APP.moreSub === "route") return renderRoute();
   if (APP.moreSub === "settings") return renderSettings();
-  appbar("More", "Setup &amp; tools");
+  const admin = APP.role === "admin";
+  appbar(admin ? "Setup" : "More", admin ? "Configuration &amp; tools" : "Setup &amp; tools");
   const mi = (icon, bg, col, t, s, go) => `<div class="menuitem" onclick="${go}"><div class="mi-ic" style="background:${bg};color:${col}">${icon}</div><div class="li-body"><div class="mi-t">${t}</div><div class="mi-s">${s}</div></div><span class="arr"><svg viewBox="0 0 24 24" width="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></span></div>`;
+  const qr = mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 20h.01M17 20v.01"/></svg>', "var(--blue-t)", "var(--blue)", "Checkpoint QR tags", "Print &amp; mount the " + ROUTE.length + " tags", "gotoSub('qr')");
+  const route = mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 21s-7-6.3-7-11a7 7 0 0 1 14 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>', "var(--primary-t)", "var(--primary)", "Patrol route", "Sequence &amp; department mapping", "gotoSub('route')");
+  const recip = mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>', "var(--amber-t)", "var(--amber)", "Report recipient", "Manager email &amp; daily time", "gotoSub('settings')");
+  const signout = mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>', "var(--red-t)", "var(--red)", "Sign out", APP.user ? "Signed in as " + esc(APP.user.username) : "End session", "logout()");
   $("#body").innerHTML = `
     <div class="card">
-      ${mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 20h.01M17 20v.01"/></svg>', "var(--blue-t)", "var(--blue)", "Checkpoint QR tags", "Print &amp; mount the " + ROUTE.length + " tags", "gotoSub('qr')")}
-      ${mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 21s-7-6.3-7-11a7 7 0 0 1 14 0c0 4.7-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>', "var(--primary-t)", "var(--primary)", "Patrol route", "Sequence &amp; department mapping", "gotoSub('route')")}
-      ${mi('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>', "var(--amber-t)", "var(--amber)", "Report recipient", "Manager email &amp; daily time", "gotoSub('settings')")}
+      ${qr}
+      ${admin ? route + recip : ""}
+      ${signout}
     </div>
     <div class="card" style="text-align:center;color:var(--faint);font-size:12px">
       <b style="color:var(--muted)">Guard Tour Management System</b><br>Manufacturing Plant · Unit 1<br>Data saved to server · reports emailed daily
@@ -547,19 +691,22 @@ function renderSettings() {
 
 /* ---------- badges ---------- */
 function refreshBadges() {
+  const b = $("#tabBadge"); if (!b) return;
   const n = APP.observations.filter((o) => o.status === "Open").length;
-  const b = $("#tabBadge"); b.textContent = n; b.style.display = n ? "grid" : "none";
+  b.textContent = n; b.style.display = n ? "grid" : "none";
 }
 
 /* ---------- boot ---------- */
 (async function boot() {
   $("#appbar").innerHTML = `<div><h1>GTMS</h1><div class="sub">Loading…</div></div>`;
+  if (!getToken()) { renderLogin(); return; }
   try {
+    const me = await api("/auth/me");
+    APP.user = me; APP.role = me.role;
     await loadConfig();
-    await Promise.all([loadActive(), loadObs(), loadShifts()]);
-    render();
+    showApp();
   } catch (e) {
-    $("#body").innerHTML = `<div class="card" style="margin-top:40px">${empty("Cannot reach the server. Is it running? (npm start)")}</div>`;
-    console.error(e);
+    clearToken();
+    renderLogin();
   }
 })();

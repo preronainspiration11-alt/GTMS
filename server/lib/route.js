@@ -1,4 +1,5 @@
-// Canonical patrol route (requirement 1), department list and observation categories.
+// Canonical patrol route, department list and observation categories.
+// The production shop floor is segregated into individual work areas.
 const ROUTE = [
   ["MG","Main Gate","Security"],
   ["TWP","Two-Wheeler Parking Area","Admin"],
@@ -20,19 +21,30 @@ const ROUTE = [
   ["ELR","Electrical Rooms","Electrical"],
   ["DGA","DG Area","Electrical"],
   ["ADM","Admin","Admin"],
-  ["PSF","Production Shop Floor","Production"],
-  ["TCW","Transformation / Combo Warehouse","Stores & Logistics"],
-  ["DSP","Dispensing","Production"],
+  // ---- Shop floor (segregated) ----
+  ["HCP","Home Care Packaging","Production"],
+  ["CLP","CLS Packaging","Production"],
+  ["QLB","Quality Lab","Quality"],
+  ["TRA","Transformation Area","Production"],
+  ["CMB","Combo Area","Production"],
+  ["WH","Warehouse","Stores & Logistics"],
+  ["WHD","Warehouse Dock","Stores & Logistics"],
+  ["DSP","Dispensing Area","Production"],
+  ["GBP","GBB Packaging","Production"],
+  ["GBM","GBB Manufacturing","Production"],
+  ["PCM","Personal Care Manufacturing","Production"],
+  ["HCM","HC Manufacturing","Production"],
+  ["MST","Maintenance Store","Maintenance"],
+  // ---- Close-out ----
   ["ODA","Other Designated Areas","Security"],
   ["SCR","Security Control Room / Main Gate","Security"],
 ].map(([code, name, dept], i) => ({ seq: i + 1, code, name, dept }));
 
 const DEPARTMENTS = [
   "Security","Admin","Maintenance","Stores & Logistics","Production",
-  "Safety & EHS","Fire & Safety","Utility & Maintenance","Electrical",
+  "Safety & EHS","Fire & Safety","Utility & Maintenance","Electrical","Quality",
 ];
 
-// [label, defaultDepartment]
 const CATEGORIES = [
   ["Safety hazard","Safety & EHS"],
   ["Housekeeping","Admin"],
@@ -41,6 +53,7 @@ const CATEGORIES = [
   ["Fire safety","Fire & Safety"],
   ["Electrical fault","Electrical"],
   ["Spillage / Environment","Safety & EHS"],
+  ["Quality issue","Quality"],
   ["Other", null],
 ];
 
