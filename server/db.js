@@ -50,10 +50,15 @@ async function init() {
   `);
 
   // reference data
-  const { rows } = await q("SELECT COUNT(*) n FROM checkpoints");
-  if (Number(rows[0].n) === 0)
-    for (const c of ROUTE)
-      await q("INSERT INTO checkpoints (seq,code,name,dept) VALUES ($1,$2,$3,$4) ON CONFLICT (code) DO NOTHING", [c.seq, c.code, c.name, c.dept]);
+  // Sync the checkpoint list to the current route: add new areas (e.g. the
+  // segregated shop floor), refresh names/order, and drop retired points.
+  // Existing rows keep their (possibly customised) department mapping.
+  for (const c of ROUTE)
+    await q(
+      "INSERT INTO checkpoints (seq,code,name,dept) VALUES ($1,$2,$3,$4) ON CONFLICT (code) DO UPDATE SET seq=EXCLUDED.seq, name=EXCLUDED.name",
+      [c.seq, c.code, c.name, c.dept]
+    );
+  await q("DELETE FROM checkpoints WHERE code <> ALL($1::text[])", [ROUTE.map((c) => c.code)]);
   for (const d of DEPARTMENTS)
     await q("INSERT INTO departments (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", [d]);
 
