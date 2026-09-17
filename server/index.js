@@ -21,6 +21,11 @@ app.use("/api/observations", requireAuth, require("./routes/observations"));
 
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+// Serve the QR-scanner and spreadsheet libraries from our own server (no CDN),
+// so scanning/export work even on networks that block third-party CDNs.
+app.use("/vendor/jsqr", express.static(path.join(__dirname, "..", "node_modules", "jsqr", "dist")));
+app.use("/vendor/xlsx", express.static(path.join(__dirname, "..", "node_modules", "xlsx", "dist")));
+
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: err.message || "Server error" }); });
 
 (async function start() {
