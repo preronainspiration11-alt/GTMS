@@ -288,25 +288,41 @@ function openScan() {
   const v = $("#svid"), c = document.createElement("canvas");
   let lastMsg = 0;
   const setHint = (tx) => { const h = $("#scanHint"); if (h) h.textContent = tx; };
+  const handle = (raw) => {
+    const code = String(raw || "").replace(/^GTMS::/i, "").trim();
+    if (cp(code)) { onScan(code); return true; }
+    if (Date.now() - lastMsg > 800) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
+    return false;
+  };
+
+  // Prefer the browser's built-in QR detector (Android Chrome, Edge, Samsung
+  // Internet) — nothing to download. Fall back to jsQR if present.
+  let detector = null;
+  if ("BarcodeDetector" in window) {
+    try { detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; }
+  }
+
   startCam(v).then((ok) => {
     if (!ok) {
       $("#scam").innerHTML = `<div class="off">Camera not available.<br>Tap the camera/padlock icon in your browser’s address bar, set Camera to “Allow”, then reopen this screen.</div>`;
       return;
     }
-    if (!window.jsQR) { setHint("Scanner still loading — check your connection"); }
-    const tick = () => {
+    if (!detector && !window.jsQR) setHint("QR scanning isn’t supported by this browser — try Chrome");
+
+    const tick = async () => {
       if (!cam) return;
-      if (v.readyState === v.HAVE_ENOUGH_DATA && window.jsQR) {
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        const x = c.getContext("2d"); x.drawImage(v, 0, 0, c.width, c.height);
-        const d = x.getImageData(0, 0, c.width, c.height);
-        const r = jsQR(d.data, d.width, d.height, { inversionAttempts: "attemptBoth" });
-        if (r && r.data) {
-          const code = r.data.replace(/^GTMS::/, "").trim();
-          if (cp(code)) { onScan(code); return; }
-          if (Date.now() - lastMsg > 800) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
+      try {
+        if (detector && v.readyState >= 2) {
+          const codes = await detector.detect(v);
+          if (codes && codes.length && handle(codes[0].rawValue)) return;
+        } else if (window.jsQR && v.readyState === v.HAVE_ENOUGH_DATA) {
+          c.width = v.videoWidth; c.height = v.videoHeight;
+          const x = c.getContext("2d"); x.drawImage(v, 0, 0, c.width, c.height);
+          const d = x.getImageData(0, 0, c.width, c.height);
+          const r = jsQR(d.data, d.width, d.height, { inversionAttempts: "attemptBoth" });
+          if (r && r.data && handle(r.data)) return;
         }
-      }
+      } catch (e) { /* ignore individual frame errors */ }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
