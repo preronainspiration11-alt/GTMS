@@ -275,40 +275,33 @@ function renderPatrol() {
   scrollTop();
 }
 
-/* ---------- SCAN (req 4) ---------- */
+/* ---------- SCAN (req 4) — full-screen live camera ---------- */
 function openScan() {
   const ni = nextIdx(), next = ROUTE[ni];
-  sheet(`<div class="sh"><h2>Scan checkpoint</h2><button class="x" onclick="closeSheet()">✕</button></div>
-    <div class="sb">
-      <div class="cam" id="scam"><video id="svid" playsinline autoplay muted></video><div class="ret"></div><div class="scan"></div><div class="hint" id="scanHint">Point the camera at the QR tag</div></div>
-      <div class="row" style="justify-content:center;margin-top:12px">
-        <span class="faint" style="font-size:12.5px">Next: <b style="color:var(--amber)">${esc(next?.name || "—")}</b></span>
-      </div>
-    </div>`);
+  const ov = document.createElement("div");
+  ov.className = "scanfull"; ov.id = "scanFull";
+  ov.innerHTML = `
+    <video id="svid" playsinline autoplay muted></video>
+    <div class="scanmask"><div class="scanbox"><i></i><div class="scanline2"></div></div></div>
+    <div class="scantop"><button class="scanx" onclick="closeScanner()">✕</button><div class="scantitle">Scan checkpoint</div></div>
+    <div class="scanhint" id="scanHint">Point the camera at the QR tag${next ? ` · Next: <b>${esc(next.name)}</b>` : ""}</div>`;
+  document.querySelector(".screen").appendChild(ov);
+
   const v = $("#svid"), c = document.createElement("canvas");
   let lastMsg = 0;
-  const setHint = (tx) => { const h = $("#scanHint"); if (h) h.textContent = tx; };
+  const setHint = (html) => { const h = $("#scanHint"); if (h) h.innerHTML = html; };
   const handle = (raw) => {
     const code = String(raw || "").replace(/^GTMS::/i, "").trim();
     if (cp(code)) { onScan(code); return true; }
-    if (Date.now() - lastMsg > 800) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
+    if (Date.now() - lastMsg > 900) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
     return false;
   };
-
-  // Prefer the browser's built-in QR detector (Android Chrome, Edge, Samsung
-  // Internet) — nothing to download. Fall back to jsQR if present.
   let detector = null;
-  if ("BarcodeDetector" in window) {
-    try { detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; }
-  }
+  if ("BarcodeDetector" in window) { try { detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; } }
 
   startCam(v).then((ok) => {
-    if (!ok) {
-      $("#scam").innerHTML = `<div class="off">Camera not available.<br>Tap the camera/padlock icon in your browser’s address bar, set Camera to “Allow”, then reopen this screen.</div>`;
-      return;
-    }
+    if (!ok) { setHint("Camera not available — allow camera access and reopen"); return; }
     if (!detector && !window.jsQR) setHint("QR scanning isn’t supported by this browser — try Chrome");
-
     const tick = async () => {
       if (!cam) return;
       try {
@@ -322,14 +315,15 @@ function openScan() {
           const r = jsQR(d.data, d.width, d.height, { inversionAttempts: "attemptBoth" });
           if (r && r.data && handle(r.data)) return;
         }
-      } catch (e) { /* ignore individual frame errors */ }
+      } catch (e) { /* ignore per-frame errors */ }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
   });
 }
+function closeScanner() { stopCam(); const ov = $("#scanFull"); if (ov) ov.remove(); }
 async function onScan(code) {
-  stopCam();
+  closeScanner();
   try { APP.shift = await api(`/shifts/${APP.shift.id}/scan`, { method: "POST", body: JSON.stringify({ code }) }); }
   catch (e) { toast("Scan failed", e.message, "r"); return; }
   renderScanSheet(code);
