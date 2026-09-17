@@ -280,27 +280,37 @@ function openScan() {
   const ni = nextIdx(), next = ROUTE[ni];
   sheet(`<div class="sh"><h2>Scan checkpoint</h2><button class="x" onclick="closeSheet()">✕</button></div>
     <div class="sb">
-      <div class="cam" id="scam"><video id="svid" playsinline muted></video><div class="ret"></div><div class="scan"></div><div class="hint">Point at the QR tag — auto-detects</div></div>
-      <div class="row" style="justify-content:space-between;margin-top:12px">
+      <div class="cam" id="scam"><video id="svid" playsinline autoplay muted></video><div class="ret"></div><div class="scan"></div><div class="hint" id="scanHint">Point the camera at the QR tag</div></div>
+      <div class="row" style="justify-content:center;margin-top:12px">
         <span class="faint" style="font-size:12.5px">Next: <b style="color:var(--amber)">${esc(next?.name || "—")}</b></span>
-        <button class="btn ghost sm" id="sim">Simulate scan</button>
       </div>
     </div>`);
   const v = $("#svid"), c = document.createElement("canvas");
+  let lastMsg = 0;
+  const setHint = (tx) => { const h = $("#scanHint"); if (h) h.textContent = tx; };
   startCam(v).then((ok) => {
-    if (!ok) { $("#scam").innerHTML = `<div class="off">Camera unavailable.<br>Use “Simulate scan”.</div>`; return; }
+    if (!ok) {
+      $("#scam").innerHTML = `<div class="off">Camera not available.<br>Tap the camera/padlock icon in your browser’s address bar, set Camera to “Allow”, then reopen this screen.</div>`;
+      return;
+    }
+    if (!window.jsQR) { setHint("Scanner still loading — check your connection"); }
     const tick = () => {
       if (!cam) return;
       if (v.readyState === v.HAVE_ENOUGH_DATA && window.jsQR) {
-        c.width = v.videoWidth; c.height = v.videoHeight; const x = c.getContext("2d"); x.drawImage(v, 0, 0, c.width, c.height);
-        const d = x.getImageData(0, 0, c.width, c.height); const r = jsQR(d.data, d.width, d.height);
-        if (r && r.data) { const code = r.data.replace(/^GTMS::/, "").trim(); if (cp(code)) { onScan(code); return; } }
+        c.width = v.videoWidth; c.height = v.videoHeight;
+        const x = c.getContext("2d"); x.drawImage(v, 0, 0, c.width, c.height);
+        const d = x.getImageData(0, 0, c.width, c.height);
+        const r = jsQR(d.data, d.width, d.height, { inversionAttempts: "attemptBoth" });
+        if (r && r.data) {
+          const code = r.data.replace(/^GTMS::/, "").trim();
+          if (cp(code)) { onScan(code); return; }
+          if (Date.now() - lastMsg > 800) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
   });
-  $("#sim").onclick = () => { if (next) onScan(next.code); };
 }
 async function onScan(code) {
   stopCam();
