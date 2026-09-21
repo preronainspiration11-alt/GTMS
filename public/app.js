@@ -64,7 +64,25 @@ $("#scrim").addEventListener("click", closeSheet);
 /* ---------- camera ---------- */
 let cam = null, raf = null;
 let faceFacing = "user"; // face verification defaults to the FRONT camera
-async function startCam(v, facing = "environment") { stopCam(); try { cam = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false }); v.srcObject = cam; await v.play(); return true; } catch (e) { return false; } }
+async function startCam(v, facing = "environment") {
+  stopCam();
+  try {
+    cam = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing } }, audio: false });
+    v.setAttribute("playsinline", ""); v.setAttribute("autoplay", ""); v.muted = true;
+    v.srcObject = cam;
+    // Wait for the stream's dimensions, then start playback — Android Chrome
+    // needs this before the <video> will actually render its frames.
+    await new Promise((res) => {
+      if (v.readyState >= 1) return res();
+      v.onloadedmetadata = () => res();
+      setTimeout(res, 800);
+    });
+    try { await v.play(); } catch (e) {}
+    // nudge a repaint (fixes the "black video" quirk on some devices)
+    requestAnimationFrame(() => { v.style.opacity = "0.999"; requestAnimationFrame(() => { v.style.opacity = "1"; }); });
+    return true;
+  } catch (e) { return false; }
+}
 function stopCam() { if (raf) { cancelAnimationFrame(raf); raf = null; } if (cam) { cam.getTracks().forEach((t) => t.stop()); cam = null; } }
 function grab(v, w = 560) { const c = document.createElement("canvas"); const ar = (v.videoWidth || 4) / (v.videoHeight || 3); c.width = w; c.height = Math.round(w / ar); c.getContext("2d").drawImage(v, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", 0.72); }
 
@@ -288,13 +306,23 @@ function openScan() {
   document.querySelector(".screen").appendChild(ov);
 
   const v = $("#svid"), c = document.createElement("canvas");
-  let lastMsg = 0;
+  let lastMsg = 0, started = performance.now(), locked = false;
+  let seen = null, seenSince = 0;
   const setHint = (html) => { const h = $("#scanHint"); if (h) h.innerHTML = html; };
   const handle = (raw) => {
+    if (locked) return true;
     const code = String(raw || "").replace(/^GTMS::/i, "").trim();
-    if (cp(code)) { onScan(code); return true; }
-    if (Date.now() - lastMsg > 900) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
-    return false;
+    if (!cp(code)) {
+      if (Date.now() - lastMsg > 900) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
+      seen = null; return false;
+    }
+    // require the SAME tag to be held steady briefly, and ignore the first moment
+    // after opening, so it can't fire in a blink or double-read.
+    const nowT = performance.now();
+    if (nowT - started < 500) return false;
+    if (seen !== code) { seen = code; seenSince = nowT; setHint("Hold steady…"); return false; }
+    if (nowT - seenSince < 350) return false;
+    locked = true; onScan(code); return true;
   };
   let detector = null;
   if ("BarcodeDetector" in window) { try { detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; } }
