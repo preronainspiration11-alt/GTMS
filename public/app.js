@@ -306,24 +306,26 @@ function openScan() {
   document.querySelector(".screen").appendChild(ov);
 
   const v = $("#svid"), c = document.createElement("canvas");
+  const HOLD = 1500, GAP = 650, WARMUP = 400;   // ms: hold time, allowed flicker gap, initial delay
+  const defHint = next ? `Point the camera at the QR tag · Next: <b>${esc(next.name)}</b>` : `Point the camera at the QR tag`;
   let lastMsg = 0, started = performance.now(), locked = false;
-  let seen = null, seenSince = 0;
+  let seen = null, seenSince = 0, lastSeen = 0;
   const setHint = (html) => { const h = $("#scanHint"); if (h) h.innerHTML = html; };
-  const handle = (raw) => {
+  const onCode = (raw) => {
     if (locked) return true;
+    const now = performance.now();
     const code = String(raw || "").replace(/^GTMS::/i, "").trim();
-    if (!cp(code)) {
-      if (Date.now() - lastMsg > 900) { setHint("Not a GTMS checkpoint tag"); lastMsg = Date.now(); }
-      seen = null; return false;
-    }
-    // require the SAME tag to be held steady briefly, and ignore the first moment
-    // after opening, so it can't fire in a blink or double-read.
-    const nowT = performance.now();
-    if (nowT - started < 500) return false;
-    if (seen !== code) { seen = code; seenSince = nowT; setHint("Hold steady…"); return false; }
-    if (nowT - seenSince < 350) return false;
-    locked = true; onScan(code); return true;
+    if (!cp(code)) { if (now - lastMsg > 900) { setHint("Not a GTMS checkpoint tag"); lastMsg = now; } seen = null; return false; }
+    if (now - started < WARMUP) return false;                 // ignore the first instant after opening
+    if (seen !== code || now - lastSeen > GAP) { seen = code; seenSince = now; } // (re)start the hold timer
+    lastSeen = now;
+    const p = Math.min(1, (now - seenSince) / HOLD);
+    if (p >= 1) { locked = true; setHint("Reading ✓"); onScan(code); return true; }
+    const bars = Math.round(p * 6);
+    setHint(`Hold steady… <b>${"▮".repeat(bars)}${"▯".repeat(6 - bars)}</b>`);
+    return false;
   };
+  const noCode = () => { const now = performance.now(); if (seen && now - lastSeen > GAP) { seen = null; setHint(defHint); } };
   let detector = null;
   if ("BarcodeDetector" in window) { try { detector = new window.BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; } }
 
@@ -335,13 +337,13 @@ function openScan() {
       try {
         if (detector && v.readyState >= 2) {
           const codes = await detector.detect(v);
-          if (codes && codes.length && handle(codes[0].rawValue)) return;
+          if (codes && codes.length) { if (onCode(codes[0].rawValue)) return; } else { noCode(); }
         } else if (window.jsQR && v.readyState === v.HAVE_ENOUGH_DATA) {
           c.width = v.videoWidth; c.height = v.videoHeight;
           const x = c.getContext("2d"); x.drawImage(v, 0, 0, c.width, c.height);
           const d = x.getImageData(0, 0, c.width, c.height);
           const r = jsQR(d.data, d.width, d.height, { inversionAttempts: "attemptBoth" });
-          if (r && r.data && handle(r.data)) return;
+          if (r && r.data) { if (onCode(r.data)) return; } else { noCode(); }
         }
       } catch (e) { /* ignore per-frame errors */ }
       raf = requestAnimationFrame(tick);
